@@ -2,7 +2,8 @@
 ribbed_slab_design.py
 ---------------------
 Backend engine for continuous ribbed slab design and PDF report generation.
-Supports rigorous checks, compression reinforcement, and variable shear states.
+Supports rigorous checks, compression reinforcement, variable shear states,
+sketches, and custom company logos.
 """
 
 import math
@@ -30,8 +31,8 @@ def sub(txt: str) -> str:
 class ProjectInfo:
     firm_name: str = "Infras Engineering Solutions"
     address: str = "P.O. Box 45297 - 00100, Nairobi, Kenya"
-    tel: str = ""
-    email: str = ""
+    tel: str = "+254 723703705"
+    email: str = "info@infrasengineering.com"
     project_title: str = "RUNDA DUOM PALM VILLA"
     job_no: str = "IES-003-2026"
     designer: str = "R.D.K"
@@ -250,6 +251,17 @@ class RibbedSlabSystem:
         pages = []
         st = {"fig": None, "ax": None, "y": TOP, "ref_y": TOP, "out_y": TOP}
 
+        # Try to load the logo
+        logo_img = None
+        try:
+            logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo.png")
+            if os.path.exists(logo_path):
+                logo_img = plt.imread(logo_path)
+            elif os.path.exists("logo.png"):
+                logo_img = plt.imread("logo.png")
+        except Exception:
+            logo_img = None
+
         def new_page():
             fig = plt.figure(figsize=(PAGE_W_IN, PAGE_H_IN))
             ax = fig.add_axes([0, 0, 1, 1])
@@ -267,11 +279,24 @@ class RibbedSlabSystem:
             ax.plot([0.5, 0.5], [HR_B, HR_T], color='black', lw=0.6)
             ax.plot([0.75, 0.75], [0.90, 0.94], color='black', lw=0.6)
             
-            # Header Texts - Left side
-            ax.text(LEFT+0.01, 0.96, f"{p.firm_name}", fontsize=11, fontweight='bold', va='center')
-            ax.text(LEFT+0.01, 0.935, f"{p.address}", fontsize=8, va='center')
-            if p.tel: ax.text(LEFT+0.01, 0.915, f"Tel: {p.tel}", fontsize=8, va='center')
-            if p.email: ax.text(LEFT+0.01, 0.895, f"Email: {p.email}", fontsize=8, va='center')
+            # Header Texts - Left side (Logo or Firm Name)
+            if logo_img is not None:
+                # Calculate aspect ratio preserving bounds for logo
+                img_h, img_w = logo_img.shape[:2]
+                aspect = img_w / img_h
+                box_w = 0.4  # Max width allocated to logo
+                box_h = 0.1  # Max height allocated
+                # Fit width or height
+                draw_w = min(box_w, box_h * aspect * (PAGE_H_IN / PAGE_W_IN))
+                draw_h = draw_w / aspect * (PAGE_W_IN / PAGE_H_IN)
+                iax = ax.inset_axes([LEFT + 0.01, 0.87, draw_w, draw_h])
+                iax.imshow(logo_img)
+                iax.axis('off')
+            else:
+                ax.text(LEFT+0.01, 0.96, f"{p.firm_name}", fontsize=11, fontweight='bold', va='center', color=BLUE)
+                ax.text(LEFT+0.01, 0.935, f"{p.address}", fontsize=8, va='center')
+                if p.tel: ax.text(LEFT+0.01, 0.915, f"Tel: {p.tel}", fontsize=8, va='center')
+                if p.email: ax.text(LEFT+0.01, 0.895, f"Email: {p.email}", fontsize=8, va='center')
 
             # Header Texts - Right side
             ax.text(0.51, 0.965, "Project Title:", fontsize=7, color='#444')
@@ -338,11 +363,106 @@ class RibbedSlabSystem:
             st["ax"].plot([X0+0.01, X0+0.25], [st["y"]-0.012, st["y"]-0.012], color='black', lw=0.8)
             gap(1.2)
 
+        # Draw 2D Isometric Block
+        def draw_block_sketch(ax_inset):
+            ax_inset.axis('off')
+            ax_inset.set_xlim(-0.2, 1.2); ax_inset.set_ylim(-0.2, 1.2)
+            # Simple 3D box projection
+            pts = [(0.1, 0.3), (0.7, 0.3), (0.7, 0.6), (0.1, 0.6)] # Front
+            ax_inset.add_patch(patches.Polygon(pts, fill=False, lw=1.2, edgecolor=BLUE))
+            pts_top = [(0.1, 0.6), (0.3, 0.8), (0.9, 0.8), (0.7, 0.6)] # Top
+            ax_inset.add_patch(patches.Polygon(pts_top, fill=False, lw=1.2, edgecolor=BLUE))
+            pts_side = [(0.7, 0.3), (0.9, 0.5), (0.9, 0.8), (0.7, 0.6)] # Side
+            ax_inset.add_patch(patches.Polygon(pts_side, fill=False, lw=1.2, edgecolor=BLUE))
+            
+            # Dimensions
+            ax_inset.plot([0.1, 0.7], [0.2, 0.2], 'k-', lw=0.8)
+            ax_inset.text(0.4, 0.15, f"{s.block_width_mm:g}", ha='center', fontsize=8)
+            
+            ax_inset.plot([0.75, 0.95], [0.25, 0.45], 'k-', lw=0.8)
+            ax_inset.text(0.95, 0.35, f"{s.block_length_mm:g}", ha='left', fontsize=8)
+            
+            ax_inset.plot([0.95, 0.95], [0.5, 0.8], 'k-', lw=0.8)
+            ax_inset.text(1.0, 0.65, f"{s.rib_depth_mm:g}", ha='left', va='center', fontsize=8)
+
+        def draw_t_section(ax_inset):
+            ax_inset.axis('off')
+            ax_inset.set_xlim(-0.2, 1.2); ax_inset.set_ylim(-0.2, 1.2)
+            w_flange = 0.8
+            h_flange = 0.3
+            w_web = 0.25
+            h_web = 0.5
+            x_c = 0.5
+            
+            # Flange
+            ax_inset.add_patch(patches.Rectangle((x_c - w_flange/2, 0.7), w_flange, h_flange, fill=False, lw=1.2, edgecolor=BLUE))
+            # Web
+            ax_inset.add_patch(patches.Rectangle((x_c - w_web/2, 0.2), w_web, h_web, fill=False, lw=1.2, edgecolor=BLUE))
+            # Erase middle line
+            ax_inset.plot([x_c - w_web/2 + 0.01, x_c + w_web/2 - 0.01], [0.7, 0.7], color='white', lw=2)
+            
+            # Reinforcement dots
+            ax_inset.plot([x_c - 0.05, x_c + 0.05], [0.25, 0.25], 'ro', markersize=4)
+            
+            # NA line
+            ax_inset.plot([0.1, 0.9], [0.85, 0.85], 'k--', lw=0.8)
+            ax_inset.text(0.05, 0.85, 'N', ha='right', va='center', fontsize=8)
+            ax_inset.text(0.95, 0.85, 'A', ha='left', va='center', fontsize=8)
+            
+            # Dims
+            ax_inset.text(0.5, 1.05, f"bf = {s.bf:g} mm", ha='center', fontsize=8)
+            ax_inset.text(0.5, 0.1, f"bw = {s.rib_width_mm:g}", ha='center', fontsize=8)
+            ax_inset.text(-0.05, 0.85, f"{s.topping_mm:g}", va='center', rotation=90, fontsize=8)
+            ax_inset.text(-0.05, 0.45, f"{s.rib_depth_mm:g}", va='center', rotation=90, fontsize=8)
+
+        def draw_detailing(ax_inset, is_midspan=True):
+            ax_inset.axis('off')
+            ax_inset.set_xlim(-0.2, 1.2); ax_inset.set_ylim(-0.2, 1.2)
+            x_c = 0.5
+            w_f = 1.0
+            h_f = 0.3
+            w_w = 0.3
+            h_w = 0.5
+            
+            ax_inset.add_patch(patches.Rectangle((x_c - w_f/2, 0.7), w_f, h_f, fill=False, lw=1, edgecolor='k'))
+            ax_inset.add_patch(patches.Rectangle((x_c - w_w/2, 0.2), w_w, h_w, fill=False, lw=1, edgecolor='k'))
+            ax_inset.plot([x_c - w_w/2 + 0.01, x_c + w_w/2 - 0.01], [0.7, 0.7], color='white', lw=2)
+            
+            # Links
+            ax_inset.add_patch(patches.Rectangle((x_c - w_w/2 + 0.05, 0.25), w_w - 0.1, h_w + h_f - 0.1, fill=False, lw=1, edgecolor=BLUE))
+            
+            # Bottom bars
+            ax_inset.plot([x_c - 0.08, x_c, x_c + 0.08], [0.28, 0.28, 0.28], 'bo', markersize=3)
+            # Mesh
+            ax_inset.plot([0.1, 0.9], [0.9, 0.9], 'b--', lw=1)
+            
+            if is_midspan:
+                ax_inset.text(0.5, 0.1, f"{r['num_bars_mid']}T{s.mid_bar_dia:g}", ha='center', fontsize=8, color=BLUE)
+                ax_inset.text(0.9, 0.5, f"T{s.link_dia:g}@{r['sv_prov']:g}", ha='left', fontsize=8, color=BLUE)
+                ax_inset.text(0.5, 1.05, "SECTION AT MIDSPAN", ha='center', fontsize=9, fontweight='bold')
+            else:
+                # Top bars
+                ax_inset.plot([0.2, 0.4, 0.6, 0.8], [0.85, 0.85, 0.85, 0.85], 'bo', markersize=3)
+                ax_inset.text(0.5, 0.1, f"{s.mid_bar_n}T{s.mid_bar_dia:g}", ha='center', fontsize=8, color=BLUE)
+                ax_inset.text(0.9, 0.5, f"T{s.link_dia:g}@{r['sv_prov']:g}", ha='left', fontsize=8, color=BLUE)
+                ax_inset.text(0.5, 1.05, "SECTION AT SUPPORT", ha='center', fontsize=9, fontweight='bold')
+                ax_inset.text(0.5, 0.75, f"T{s.sup_bar_dia:g}@{s.sup_bar_spacing:g}", ha='center', fontsize=8, color=BLUE)
+
         # ---------------------------------------------------------
         # Build PDF Content
         # ---------------------------------------------------------
         new_page()
         
+        # --- INSERT SKETCHES HERE ---
+        sk_h = 0.18
+        fit(sk_h + 0.02)
+        ax1 = st["ax"].inset_axes([X0, st["y"]-sk_h, 0.35, sk_h])
+        draw_block_sketch(ax1)
+        ax2 = st["ax"].inset_axes([X0+0.38, st["y"]-sk_h, 0.35, sk_h])
+        draw_t_section(ax2)
+        st["y"] -= sk_h + 0.02
+        st["ref_y"] = st["out_y"] = st["y"]
+
         # Block Geometry properties
         line(f"Hollow blocks = {s.rib_depth_mm} x {s.block_width_mm} x {s.block_length_mm} mm")
         line(f"Weight of 1 block = {s.block_weight_kg} kg")
@@ -435,6 +555,17 @@ class RibbedSlabSystem:
         else:
             line("Allowable l/d < Actual l/d \u2192 Deflection fails!", out="Deflection FAILS", bold=True, calc_color='red')
         gap()
+        
+        # --- CONSTRUCTION DETAILS SKETCHES ---
+        heading("Construction Details")
+        sk_h2 = 0.22
+        fit(sk_h2 + 0.02)
+        ax3 = st["ax"].inset_axes([X0, st["y"]-sk_h2, 0.38, sk_h2])
+        draw_detailing(ax3, is_midspan=True)
+        ax4 = st["ax"].inset_axes([X0+0.4, st["y"]-sk_h2, 0.38, sk_h2])
+        draw_detailing(ax4, is_midspan=False)
+        st["y"] -= sk_h2 + 0.02
+        st["ref_y"] = st["out_y"] = st["y"]
         
         heading("Equivalent Slab Depth")
         line(f"Total Structural Dead Load = {r['sw_total']:.2f} kN/m²")
